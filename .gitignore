@@ -14,8 +14,6 @@ __pycache__/
 
 datos/raw/*
 datos/processed/*
-datos/toy/*
 
 !datos/raw/.gitkeep
 !datos/processed/.gitkeep
-!datos/toy/.gitkeep
