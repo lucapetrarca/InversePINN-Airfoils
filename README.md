@@ -12,3 +12,5 @@ Se pueden descargar los datos utilizados (crudos y procesados) en el siguiente e
 1. Descargar los archivos del enlace.
 2. Agregar `ala_2d_completo.csv` dentro de la carpeta `datos/raw/`.
 3. Agregar `ala_2d_processed_completo.csv` dentro de la carpeta `datos/processed/`.
+
+Cabe destacar que el dataset base utilizado fue obtenido a partir del enlace [Datasets (Kaggle)](https://www.kaggle.com/datasets/dipeshpaudel10/airfrans-preprocessed) 
