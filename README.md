@@ -4,7 +4,7 @@ Descubrimiento de viscosidad turbulenta y parámetros efectivos en perfiles alar
 ## Datos del Proyecto
 
 Debido al tamaño de los archivos, los datasets no están incluidos en el repositorio. 
-Se pueden descargar los datos utilizados (crudos y procesador) en el siguiente enlace:
+Se pueden descargar los datos utilizados (crudos y procesados) en el siguiente enlace:
 
 [Descargar Datasets (Google Drive)](https://drive.google.com/drive/folders/12NgoSwfnQ0zgHZEZwmGJLEFZro6wZ_--?usp=sharing)
 
