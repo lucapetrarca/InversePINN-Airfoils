@@ -21,5 +21,5 @@ def calcular_loss(modelo, x, y):
     residuo_x = ux * dux_dx + uy * dux_dy - nu_adimensional * (dux_dxx + dux_dyy)
     residuo_y = ux * duy_dx + uy * duy_dy - nu_adimensional * (duy_dxx + duy_dyy)
     
-    loss_physics = torch.mean(residuo_x*2) + torch.mean(residuo_y*2)
+    loss_physics = torch.mean(residuo_x**2) + torch.mean(residuo_y**2)
     return loss_physics

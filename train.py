@@ -54,7 +54,13 @@ def entrenar_pinn():
         else:
             lambda_physics = 0.1
             
-        df_batch = df.sample(n=min(5000, len(df)))
+        #Se realiza muestreo importante asignando puntos cercanos a las condiciones de borde
+        zona_critica = df[df['implicit_distance'].abs() < 0.05]
+        zona_lejana = df[df['implicit_distance'].abs() >= 0.05]
+        batch_critico = zona_critica.sample(n=min(2500, len(zona_critica)))
+        batch_lejano = zona_lejana.sample(n=min(2500, len(zona_lejana)))
+        df_batch = pd.concat([batch_critico, batch_lejano]).sample(frac=1.0)
+
         x_t = torch.tensor(df_batch['x'].values.reshape(-1, 1), dtype=torch.float32, requires_grad=True).to(device)
         y_t = torch.tensor(df_batch['y'].values.reshape(-1, 1), dtype=torch.float32, requires_grad=True).to(device)
         ux_t = torch.tensor(df_batch['U_x'].values.reshape(-1, 1), dtype=torch.float32).to(device)
@@ -79,9 +85,16 @@ def entrenar_pinn():
             print(f"ADAM  | Epoch {epoch:5d} | L_Total: {loss_total.item():.5f} | L_Data: {loss_data.item():.5f} | L_physics: {loss_physics.item():.6f} | ν_real: {visc_real:.6f}")
 
     #Fase 2: Se optimiza con LBFGS fijando muestra para consistencia geométrica
-    print(f"\n🚀 ¡Luca, entramos en Fase LBFGS! Refinando curvatura de segundo orden...")
+    print(f"\nFase LBFGS Refinando curvatura de segundo orden...")
     pinn.train()
-    df_lbfgs = df.sample(n=min(15000, len(df)))
+    
+    #Se realiza muestreo estratificado para LBFGS asignando la mitad de la muestra a la capa limite
+    zona_critica_lbfgs = df[df['implicit_distance'].abs() < 0.05]
+    zona_lejana_lbfgs = df[df['implicit_distance'].abs() >= 0.05]
+    batch_lbfgs_critico = zona_critica_lbfgs.sample(n=min(7500, len(zona_critica_lbfgs)))
+    batch_lbfgs_lejano = zona_lejana_lbfgs.sample(n=min(7500, len(zona_lejana_lbfgs)))
+    df_lbfgs = pd.concat([batch_lbfgs_critico, batch_lbfgs_lejano]).sample(frac=1.0)
+
     x_l = torch.tensor(df_lbfgs['x'].values.reshape(-1, 1), dtype=torch.float32, requires_grad=True).to(device)
     y_l = torch.tensor(df_lbfgs['y'].values.reshape(-1, 1), dtype=torch.float32, requires_grad=True).to(device)
     ux_l = torch.tensor(df_lbfgs['U_x'].values.reshape(-1, 1), dtype=torch.float32).to(device)
@@ -111,9 +124,7 @@ def entrenar_pinn():
     #Se guardan los pesos
     ruta_guardado = "datos/processed/inverse_pinn_model.pth"
     torch.save(pinn.state_dict(), ruta_guardado)
-    print(f"✅ Pesos del modelo guardados exitosamente en: {ruta_guardado}")
+    print(f"Pesos del modelo guardados exitosamente en: {ruta_guardado}")
 
 if __name__ == "__main__":
     entrenar_pinn()
-
-    
