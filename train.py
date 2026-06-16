@@ -5,88 +5,115 @@ import time
 import torch
 import pandas as pd
 import numpy as np
-
-# Asegurar que el script encuentre el paquete src
 sys.path.append(os.path.abspath("."))
 from src.model import InversePINN
 from src.physics import calcular_loss
 
-def test_entrenamiento_rapido():
+def entrenar_pinn():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(f"=== Iniciando Test Rápido ===")
+    print(f"=== Iniciando Entrenamiento Inverse PINN ===")
     print(f"Dispositivo: {device}")
     
-    # 1. Rutas de archivos (ajustá si es necesario)
-    ruta_dataset = "datos/processed/ala_2d_processed_completo.csv" # O podés usar el processed completo
-    ruta_scaler = "datos/processed/ala_2d_processed_completo_scaler.pkl"
+    #Se asignan las rutas de los archivos
+    ruta_dataset = "datos/processed/ala_2d_processed_completo.csv"
+    ruta_escala = "datos/processed/ala_2d_processed_completo_escala.pkl"
 
-    # 2. Cargar datos y scaler
+    #Se cargan los datos y la constante de normalización de la velocidad
     df = pd.read_csv(ruta_dataset)
-    with open(ruta_scaler, "rb") as f:
-        scaler = pickle.load(f)
+    with open(ruta_escala, "rb") as f:
+        dic_escala = pickle.load(f)
+        U_ref = dic_escala['U_ref']
 
-    # 3. Extraer factores del scaler
-    escalas = (scaler.scale_[0], scaler.scale_[1], scaler.scale_[2], scaler.scale_[3])
-    minimos_u = (scaler.min_[2], scaler.min_[3])
+    print(f"Velocidad de referencia (U_ref) cargada: {U_ref:.2f} m/s")
 
-    # 4. Instanciar Modelo y Optimizador
-    pinn = InversePINN(num_capas=4, num_neuronas=64).to(device)
+    #Se establece una InversePINN con 5 capas y 128 neuronas
+    pinn = InversePINN(num_capas=5, num_neuronas=128).to(device)
     
-    # lr=3e-4 ajustado para mejor convergencia y estabilidad
-    optimizer = torch.optim.Adam(pinn.parameters(), lr=3e-4) 
+    #Se asigna el método ADAM como optimizador para la primera fase
+    optimizer_adam = torch.optim.Adam(pinn.parameters(), lr=1e-3)
     
-    epochs = 5000
-    #lambda_physics = 1e-3
-
-    print(f"\nArrancando bucle de {epochs} épocas con muestreo dinámico...")
+    #Se asigna el método LBFGS como optimizador para el ajuste final
+    optimizer_lbfgs = torch.optim.LBFGS(
+        pinn.parameters(), 
+        lr=1.0, 
+        max_iter=200, 
+        history_size=50, 
+        line_search_fn="strong_wolfe"
+    )
+    
+    epochs_adam = 10000
     start_time = time.time()
 
-    # 5. Bucle de Entrenamiento
-    for epoch in range(epochs + 1):
-                # Adentro del for epoch in range(epochs):
-        if epoch < 2000:
-            lambda_physics = 1e-3
-        elif epoch < 4000:
-            lambda_physics = 1e-2
+    #Fase 1: Se optimiza con ADAM con Muestreo Dinámico
+    print(f"\nArrancando Fase 1: {epochs_adam} épocas con ADAM...")
+    for epoch in range(epochs_adam + 1):
+        if epoch < 3000:
+            lambda_physics = 0.0
+        elif epoch < 7000:
+            lambda_physics = 0.01   #Se modifica el lambda_physics según la epoch
         else:
-            lambda_physics = 1e-1  # Le damos mucha más fuerza a Burgers al final
-        # --- MUESTREO DINÁMICO ---
-        # En cada época, elegimos 5000 puntos distintos al azar
+            lambda_physics = 0.1
+            
         df_batch = df.sample(n=min(5000, len(df)))
-        
-        # Transformar a tensores
         x_t = torch.tensor(df_batch['x'].values.reshape(-1, 1), dtype=torch.float32, requires_grad=True).to(device)
         y_t = torch.tensor(df_batch['y'].values.reshape(-1, 1), dtype=torch.float32, requires_grad=True).to(device)
         ux_t = torch.tensor(df_batch['U_x'].values.reshape(-1, 1), dtype=torch.float32).to(device)
         uy_t = torch.tensor(df_batch['U_y'].values.reshape(-1, 1), dtype=torch.float32).to(device)
 
-        optimizer.zero_grad()
-        
-        # Forward pass
+        optimizer_adam.zero_grad()
         ux_pred, uy_pred = pinn(x_t, y_t)
-        
-        # Calcular pérdidas
         loss_data = torch.mean((ux_pred - ux_t)**2) + torch.mean((uy_pred - uy_t)**2)
-        loss_physics = calcular_loss(pinn, x_t, y_t, escalas=escalas, minimos_u=minimos_u)
         
+        if lambda_physics > 0.0:
+            loss_physics = calcular_loss(pinn, x_t, y_t)
+        else:
+            loss_physics = torch.tensor(0.0, device=device)
+            
         loss_total = loss_data + lambda_physics * loss_physics
-        
-        # Backpropagation
         loss_total.backward()
-        
-        # --- GRADIENT CLIPPING ---
-        # Se aplica SIEMPRE después del .backward() y antes del .step()
         torch.nn.utils.clip_grad_norm_(pinn.parameters(), max_norm=1.0)
+        optimizer_adam.step()
         
-        optimizer.step()
-        
-        # Imprimir progreso cada 500 épocas
-        if epoch % 500 == 0:
-            elapsed = time.time() - start_time
-            visc_actual = pinn.obtener_viscosidad().item()
-            print(f"Epoch {epoch:4d} | Tiempo: {elapsed:.1f}s | Loss Total: {loss_total.item():.6f} | L_Data: {loss_data.item():.6f} | L_Phys: {loss_physics.item():.2f} | ν: {visc_actual:.6f}")
+        if epoch % 1000 == 0:
+            visc_real = pinn.obtener_viscosidad().item() * U_ref * 1.0
+            print(f"ADAM  | Epoch {epoch:5d} | L_Total: {loss_total.item():.5f} | L_Data: {loss_data.item():.5f} | L_physics: {loss_physics.item():.6f} | ν_real: {visc_real:.6f}")
 
-    print("\n¡Test finalizado con éxito!")
+    #Fase 2: Se optimiza con LBFGS fijando muestra para consistencia geométrica
+    print(f"\n🚀 ¡Luca, entramos en Fase LBFGS! Refinando curvatura de segundo orden...")
+    pinn.train()
+    df_lbfgs = df.sample(n=min(15000, len(df)))
+    x_l = torch.tensor(df_lbfgs['x'].values.reshape(-1, 1), dtype=torch.float32, requires_grad=True).to(device)
+    y_l = torch.tensor(df_lbfgs['y'].values.reshape(-1, 1), dtype=torch.float32, requires_grad=True).to(device)
+    ux_l = torch.tensor(df_lbfgs['U_x'].values.reshape(-1, 1), dtype=torch.float32).to(device)
+    uy_l = torch.tensor(df_lbfgs['U_y'].values.reshape(-1, 1), dtype=torch.float32).to(device)
+
+    def closure():
+        optimizer_lbfgs.zero_grad()
+        ux_p, uy_p = pinn(x_l, y_l)
+        l_data = torch.mean((ux_p - ux_l)**2) + torch.mean((uy_p - uy_l)**2)
+        l_phys = calcular_loss(pinn, x_l, y_l)
+        l_total = l_data + 0.1 * l_phys
+        l_total.backward()
+        return l_total
+
+    optimizer_lbfgs.step(closure)
+    
+    ux_final, uy_final = pinn(x_l, y_l)
+    l_data_final = torch.mean((ux_final - ux_l)**2) + torch.mean((uy_final - uy_l)**2)
+    l_phys_final = calcular_loss(pinn, x_l, y_l)
+    l_total_final = l_data_final + 0.1 * l_phys_final
+    visc_final = pinn.obtener_viscosidad().item() * U_ref * 1.0
+    
+    print(f"\nLBFGS | Iteración Final | L_Total: {l_total_final.item():.5f} | L_Data: {l_data_final.item():.5f} | L_physics: {l_phys_final.item():.6f} | ν_real definitiva: {visc_final:.6f}")
+
+    print("\n¡Entrenamiento híbrido finalizado!")
+    
+    #Se guardan los pesos
+    ruta_guardado = "datos/processed/inverse_pinn_model.pth"
+    torch.save(pinn.state_dict(), ruta_guardado)
+    print(f"✅ Pesos del modelo guardados exitosamente en: {ruta_guardado}")
 
 if __name__ == "__main__":
-    test_entrenamiento_rapido()
+    entrenar_pinn()
+
+    
