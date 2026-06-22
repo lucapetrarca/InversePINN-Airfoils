@@ -4,3 +4,6 @@ numpy
 pyvista
 scipy
 matplotlib
+sys
+os
+pickle
